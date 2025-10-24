@@ -1,15 +1,15 @@
 #!/bin/sh
 
 # 读取设置文件
-function get_config(){
-	while [[ "$*" != "" ]]; do
-		eval ${1}='`uci get pushbot.pushbot.$1`' 2>/dev/null
+get_config(){
+	while [ -n "$1" ]; do
+		eval "${1}=\"\$(uci get pushbot.pushbot.${1} 2>/dev/null)\""
 		shift
 	done
 }
 
 # 初始化设置信息
-function read_config(){
+read_config(){
 	get_config "pushbot_enable" "lite_enable" "device_name" "sleeptime" "oui_dir" "oui_data" "oui_url" "reset_regularly" "debuglevel" "device_aliases" \
 	"pushbot_ipv4" "ipv4_interface" "pushbot_ipv6" "ipv6_interface" "pushbot_up" "pushbot_down" "cpuload_enable" "cpuload" "temperature_enable" "temperature" \
 	"regular_time" "regular_time_2" "regular_time_3" "interval_time" \
@@ -28,29 +28,44 @@ function read_config(){
       fi
   done
 
-	dir="/tmp/pushbot/" && mkdir -p ${dir}
-	tempjsonpath="/tmp/pushbot/temp.json"
+	dir="/tmp/pushbot/"
+	mkdir -p "$dir"
+	tempjsonpath="${dir}temp.json"
 	ip_blacklist_path="/usr/bin/pushbot/api/ip_blacklist"
-	[ ! -z "$oui_dir" ] && [ "$oui_dir" -eq "1" ] && oui_base="${dir}oui_base.txt" || oui_base="/usr/bin/pushbot/oui_base.txt"
-	debuglevel=`echo "$debuglevel"` && [ -z "$debuglevel" ] && logfile="/dev/null" || logfile="${dir}pushbot.log"
-	pushbot_blacklist=`echo "$pushbot_blacklist"|sed 's/ /\n/g'` 2>/dev/null
-	pushbot_whitelist=`echo "$pushbot_whitelist"|sed 's/ /\n/g'` 2>/dev/null
-	device_aliases=`echo "$device_aliases"|sed 's/ /\n/g'|sed 's/-/ /'` 2>/dev/null
-	err_device_aliases=`echo "$err_device_aliases"|sed 's/ /\n/g'` 2>/dev/null
-	client_usage_whitelist=`echo "$client_usage_whitelist"|sed 's/ /\n/g'` 2>/dev/null
-	ip_white_list=`echo "$ip_white_list"|sed 's/ /\n/g'` 2>/dev/null
+	
+	if [ -n "$oui_dir" ] && [ "$oui_dir" -eq "1" ]; then
+		oui_base="${dir}oui_base.txt"
+	else
+		oui_base="/usr/bin/pushbot/oui_base.txt"
+	fi
+	
+	# 日志配置：debuglevel=1 启用日志，否则禁用
+	if [ -n "$debuglevel" ] && [ "$debuglevel" = "1" ]; then
+		logfile="${dir}pushbot.log"
+	else
+		logfile="/dev/null"
+	fi
+	
+	pushbot_blacklist=$(echo "$pushbot_blacklist" | tr ' ' '\n') 2>/dev/null
+	pushbot_whitelist=$(echo "$pushbot_whitelist" | tr ' ' '\n') 2>/dev/null
+	device_aliases=$(echo "$device_aliases" | tr ' ' '\n' | sed 's/-/ /') 2>/dev/null
+	err_device_aliases=$(echo "$err_device_aliases" | tr ' ' '\n') 2>/dev/null
+	client_usage_whitelist=$(echo "$client_usage_whitelist" | tr ' ' '\n') 2>/dev/null
+	ip_white_list=$(echo "$ip_white_list" | tr ' ' '\n') 2>/dev/null
 	mark_mac_list="${MAC_online_list} ${MAC_offline_list}"
-	mark_mac_list=`echo "$mark_mac_list"|sed 's/ /\n/g'|sed 's/-/ /'` 2>/dev/null
-	ipv4_urllist=`cat /usr/bin/pushbot/api/ipv4.list` 2>/dev/null
-	ipv6_urllist=`cat /usr/bin/pushbot/api/ipv6.list` 2>/dev/null
-	[ -z "$pushbot_ipv4" ] && pushbot_ipv4=0
-	[ -z "$pushbot_ipv6" ] && pushbot_ipv6=0
-	[ "$iw_version" ] && wlan_interface=`iw dev|grep Interface|awk '{print $2}'` >/dev/null 2>&1
+	mark_mac_list=$(echo "$mark_mac_list" | tr ' ' '\n' | sed 's/-/ /') 2>/dev/null
+	ipv4_urllist=$(cat /usr/bin/pushbot/api/ipv4.list 2>/dev/null)
+	ipv6_urllist=$(cat /usr/bin/pushbot/api/ipv6.list 2>/dev/null)
+	: "${pushbot_ipv4:=0}"
+	: "${pushbot_ipv6:=0}"
+	[ -n "$iw_version" ] && wlan_interface=$(iw dev 2>/dev/null | awk '/Interface/{print $2}')
 	[ -z "$up_timeout" ] || [ "$up_timeout" -eq "0" ] && up_timeout="2"
-	[ -z "$down_timeout" ] || [ "$down_timeout" -eq "0" ] && down_timeout="20";down_timeout=`expr ${down_timeout} / 2 + 1`
-	[ -z "$timeout_retry_count" ] && timeout_retry_count="2";[ "$timeout_retry_count" -eq "0" ] && timeout_retry_count="1"
-	[ ! -z "$bark_token" ] && [ -z "$bark_srv" ] && bark_srv="https://api.day.app"
-	[ ! -z "$pushdeer_key" ] && [ -z "$pushdeer_srv" ] && pushdeer_srv="https://api2.pushdeer.com"
+	[ -z "$down_timeout" ] || [ "$down_timeout" -eq "0" ] && down_timeout="20"
+	down_timeout=$((down_timeout / 2 + 1))
+	: "${timeout_retry_count:=2}"
+	[ "$timeout_retry_count" -eq "0" ] && timeout_retry_count="1"
+	[ -n "$bark_token" ] && [ -z "$bark_srv" ] && bark_srv="https://api.day.app"
+	[ -n "$pushdeer_key" ] && [ -z "$pushdeer_srv" ] && pushdeer_srv="https://api2.pushdeer.com"
 	
 # 字符串读取
 	str_title_start=`/usr/bin/jq -r '.str_title_start' ${jsonpath}`
@@ -69,35 +84,56 @@ function read_config(){
 	percentsym=`/usr/bin/jq -r '.percentsym' ${jsonpath}`
 	boldstar=`/usr/bin/jq -r '.boldstar' ${jsonpath}`
 	table_tab=`/usr/bin/jq -r '.tabletab' ${jsonpath}`
-	( echo "$lite_enable"|grep -q "content" ) && str_title_start="" && str_title_end="" && str_splitline="" && str_linefeed="" && str_tab=""
+	if echo "$lite_enable" | grep -q "content"; then
+		str_title_start=""
+		str_title_end=""
+		str_splitline=""
+		str_linefeed=""
+		str_tab=""
+	fi
 }
 	
 	
 
 # 初始化
-function pushbot_init(){
+pushbot_init(){
 	enable_detection
-	if [ -f "/usr/bin/pushbot/errlog" ]; then
-		cat /usr/bin/pushbot/errlog > ${logfile}
-		echo "`date "+%Y-%m-%d %H:%M:%S"` 【！！！】载入上次重启前日志" >> ${logfile}
-		echo "--------------------------------------------------------" >> ${logfile}
+	
+	# 确保日志文件存在
+	if [ "$logfile" != "/dev/null" ]; then
+		touch "$logfile" 2>/dev/null
+		
+		# 载入上次重启前的日志
+		if [ -f "/usr/bin/pushbot/errlog" ]; then
+			cat /usr/bin/pushbot/errlog > "$logfile"
+			echo "$(date "+%Y-%m-%d %H:%M:%S") 【！！！】载入上次重启前日志" >> "$logfile"
+			echo "--------------------------------------------------------" >> "$logfile"
+		fi
 	fi
+	
 	down_oui &
 	deltemp
 	get_syslog
 	add_ip_black
 	
 	rm -f ${dir}fd1 ${dir}sheep_usage ${dir}old_sheep_usage ${dir}client_usage_aliases ${dir}old_client_usage_aliases /usr/bin/pushbot/errlog >/dev/null 2>&1
-	[ ! -f "/usr/sbin/wrtbwmon" ] && echo "`date "+%Y-%m-%d %H:%M:%S"` 【！！！】未安装 wrtbwmon ，流量统计不可用" >> ${logfile}
-	[ -z "$ip_version" ] && echo "`date "+%Y-%m-%d %H:%M:%S"` 【！！！】无法获取依赖项 iputils-arping 版本号，请确认插件是否正常运行" >> ${logfile}
-	[ -z "$cu_version" ] && echo "`date "+%Y-%m-%d %H:%M:%S"` 【！！！】无法获取依赖项 curl 版本号，请确认插件是否正常运行" >> ${logfile}
-	[ -z "${dd_webhook}${qywx_corpid}${qywx_agentid}${qywx_corpsecret}${qywx_touser}${pp_token}${we_webhook}${fs_webhook}${bark_token}${pushdeer_key}" ] && echo "`date "+%Y-%m-%d %H:%M:%S"` 【！！！】请填写正确的Token/Webhook " >> ${logfile} && return 1
-	local interfacelist=`getinterfacelist` && [ -z "$interfacelist" ] && echo "`date "+%Y-%m-%d %H:%M:%S"` 【！！！】无法正确获取接口信息，请确认插件是否正常运行" >> ${logfile}
+	[ ! -f "/usr/sbin/wrtbwmon" ] && echo "$(date "+%Y-%m-%d %H:%M:%S") 【！！！】未安装 wrtbwmon ，流量统计不可用" >> "$logfile"
+	[ -z "$ip_version" ] && echo "$(date "+%Y-%m-%d %H:%M:%S") 【！！！】无法获取依赖项 iputils-arping 版本号，请确认插件是否正常运行" >> "$logfile"
+	[ -z "$cu_version" ] && echo "$(date "+%Y-%m-%d %H:%M:%S") 【！！！】无法获取依赖项 curl 版本号，请确认插件是否正常运行" >> "$logfile"
+	
+	if [ -z "${dd_webhook}${qywx_corpid}${qywx_agentid}${qywx_corpsecret}${qywx_touser}${pp_token}${we_webhook}${fs_webhook}${bark_token}${pushdeer_key}" ]; then
+		echo "$(date "+%Y-%m-%d %H:%M:%S") 【！！！】请填写正确的Token/Webhook" >> "$logfile"
+		return 1
+	fi
+	
+	local interfacelist
+	interfacelist=$(getinterfacelist)
+	[ -z "$interfacelist" ] && echo "$(date "+%Y-%m-%d %H:%M:%S") 【！！！】无法正确获取接口信息，请确认插件是否正常运行" >> "$logfile"
 	return 0
 }
 
 # 推送
-function diy_send(){
+diy_send(){
 	( ! echo "$lite_enable"|grep -q "content" ) && ( ! echo "$lite_enable"|grep -q "nowtime" ) && local nowtime=`date "+%Y-%m-%d %H:%M:%S"`
 	local diyurl=`/usr/bin/jq -r .url ${3}` && local diyurl=`eval echo ${diyurl}`
 	local type=`/usr/bin/jq -r '.type' ${3}` && local type=`eval echo ${type}`
@@ -113,7 +149,7 @@ function diy_send(){
 }
 
 # 下载设备MAC厂商信息
-function down_oui(){
+down_oui(){
 	[ -f ${oui_base} ] && local logrow=$(grep -c "" ${oui_base}) || local logrow="0"
 	[ $logrow -lt "10" ] && rm -f ${oui_base} >/dev/null 2>&1
 	if [ ! -z "$oui_data" ] && [ "$oui_data" -ne "3" ] && [ ! -f ${oui_base} ]; then
@@ -133,31 +169,49 @@ utstarcom\|volans\|xerox\|xiaomi\|zdc\|zhongxing\|smartisan" > ${oui_base} && ec
 }
 
 # 清理临时文件
-function deltemp(){
-	unset title	content ipAddress_logrow online_list online_mac mac_online_status
-	rm -f ${dir}title ${dir}content ${dir}tmp_downlist ${dir}send_enable.lock ${tempjsonpath} >/dev/null 2>&1
+deltemp(){
+	unset title content ipAddress_logrow online_list online_mac mac_online_status
+	rm -f "${dir}title" "${dir}content" "${dir}tmp_downlist" "${dir}send_enable.lock" "$tempjsonpath" 2>/dev/null
 	LockFile unlock
-	[ -f ${logfile} ] && local logrow=$(grep -c "" ${logfile}) || local logrow="0"
-	[ $logrow -gt 500 ] && sed -i '1,100d' ${logfile} && echo "`date "+%Y-%m-%d %H:%M:%S"`  【清理】日志超出上限，删除前 100 条" >> ${logfile}
+	
+	if [ -f "$logfile" ] && [ "$logfile" != "/dev/null" ]; then
+		local logrow
+		logrow=$(wc -l < "$logfile" 2>/dev/null || echo 0)
+		if [ "$logrow" -gt 500 ]; then
+			sed -i '1,100d' "$logfile"
+			echo "$(date "+%Y-%m-%d %H:%M:%S") 【清理】日志超出上限，删除前 100 条" >> "$logfile"
+		fi
+	fi
 }
 
 # 检测程序开关
-function enable_detection(){
-	[ ! "$1" ] && local time_n=1
-	for i in `seq 1 $time_n`; do
-		get_config pushbot_enable;[ -z "$pushbot_enable" ] || [ "$pushbot_enable" -eq "0" ] && `/etc/init.d/pushbot stop` || sleep 1
+enable_detection(){
+	[ -z "$1" ] && local time_n=1 || local time_n="$1"
+	local i
+	for i in $(seq 1 "$time_n"); do
+		get_config pushbot_enable
+		if [ -z "$pushbot_enable" ] || [ "$pushbot_enable" -eq "0" ]; then
+			/etc/init.d/pushbot stop
+		else
+			sleep 1
+		fi
 	done
 }
 
 # 获取 ip
-function getip(){
-	[ ! "$1" ] && return
-	if [ $1 == "wanipv4" ] ;then
-		[ ! -z "$ipv4_interface" ] && local wanIP=$(/sbin/ifconfig ${ipv4_interface}|awk '/inet addr/ {print $2}'|awk -F: '{print $2}'|grep -oE '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}')
-		[ -z "$ipv4_interface" ] && local wanIP=$(getinterfacelist|grep '\"address\"'|grep -oE '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}')
+getip(){
+	[ -z "$1" ] && return 1
+	
+	if [ "$1" = "wanipv4" ]; then
+		local wanIP
+		if [ -n "$ipv4_interface" ]; then
+			wanIP=$(ip -4 addr show "$ipv4_interface" 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -n1)
+		else
+			wanIP=$(getinterfacelist | grep -oE '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | head -n1)
+		fi
 		echo "$wanIP"
-	elif [ $1 == "hostipv4" ] ;then
-		function get_hostipv4()
+	elif [ "$1" = "hostipv4" ]; then
+		get_hostipv4()
 		{
 			local url_number=`echo "$ipv4_urllist"|wc -l`
 			local ipv4_URL=`echo "$ipv4_urllist"| sed -n "$(rand 1 $url_number)p"|sed -e 's/\r//g'`
@@ -168,12 +222,16 @@ function getip(){
 		[ -z "$hostIP" ] && local hostIP=`get_hostipv4`
 		[ -z "$hostIP" ] && local hostIP=`get_hostipv4`
 		echo $hostIP # 重试，偷懒，有空再优化
-	elif [ $1 == "wanipv6" ] ;then
-		[ ! -z "$ipv6_interface" ] && local wanIPv6=$(ip addr show ${ipv6_interface}|grep -v deprecated|grep -A1 'inet6 [^f:]'|sed -nr ':a;N;s#^ +inet6 ([a-f0-9:]+)/.+? scope global .*? valid_lft ([0-9]+sec) .*#\2 \1#p;ta'|sort -nr|head -n1|awk '{print $2}')
-		[ -z "$ipv6_interface" ] && local wanIPv6=$(ip addr show|grep -v deprecated|grep -A1 'inet6 [^f:]'|sed -nr ':a;N;s#^ +inet6 ([a-f0-9:]+)/.+? scope global .*? valid_lft ([0-9]+sec) .*#\2 \1#p;ta'|sort -nr|head -n1|awk '{print $2}')
+	elif [ "$1" = "wanipv6" ]; then
+		local wanIPv6
+		if [ -n "$ipv6_interface" ]; then
+			wanIPv6=$(ip -6 addr show "$ipv6_interface" 2>/dev/null | grep 'inet6.*scope global' | grep -v deprecated | awk '{print $2}' | cut -d/ -f1 | head -n1)
+		else
+			wanIPv6=$(ip -6 addr show 2>/dev/null | grep 'inet6.*scope global' | grep -v deprecated | awk '{print $2}' | cut -d/ -f1 | head -n1)
+		fi
 		echo "$wanIPv6"
-	elif [ $1 == "hostipv6" ] ;then
-		function get_hostipv6()
+	elif [ "$1" = "hostipv6" ]; then
+		get_hostipv6()
 		{
 			local urlv6_number=`echo "$ipv6_urllist"|wc -l`
 			local ipv6_URL=`echo "$ipv6_urllist"| sed -n "$(rand 1 $urlv6_number)p"|sed -e 's/\r//g'`
@@ -188,9 +246,19 @@ function getip(){
 }
 
 # 获取接口信息
-function getinterfacelist(){
-	[ `ubus list|grep -w -i "network.interface.wan"|wc -l` -ge "1" ] && ubus call network.interface.wan status && return
-	[ `ubus list|grep -i "network.interface."|grep -v "loopback"|grep -v "wan6"|wc -l` -eq "1" ] && ubus call `ubus list|grep "network.interface."|grep -v "loopback"` status && return
+getinterfacelist(){
+	# 优先获取 WAN 接口信息
+	if ubus list 2>/dev/null | grep -qw "network.interface.wan"; then
+		ubus call network.interface.wan status 2>/dev/null
+		return
+	fi
+	
+	# 获取第一个非 loopback 和非 wan6 的接口
+	local interface
+	interface=$(ubus list 2>/dev/null | grep "network.interface\." | grep -v "loopback" | grep -v "wan6" | head -n1)
+	if [ -n "$interface" ]; then
+		ubus call "$interface" status 2>/dev/null
+	fi
 }
 
 # 获取接口在线时间
@@ -199,91 +267,224 @@ function getinterfaceuptime(){
 }
 
 # 查询 mac 地址
-function getmac(){
-	( echo "$tmp_mac"|grep -q "unknown" ) && unset tmp_mac # 为unknown时重新读取
-	[ -f "${dir}ipAddress" ] && [ -z "$tmp_mac" ] && local tmp_mac=`cat ${dir}ipAddress|grep -w ${1}|awk '{print $2}'|grep -v "^$"|sort -u|head -n1`
-	[ -f "${dir}tmp_downlist" ] && [ -z "$tmp_mac" ] && local tmp_mac=`cat ${dir}tmp_downlist|grep -w ${1}|awk '{print $2}'|grep -v "^$"|sort -u|head -n1`
-	[ -f "/var/dhcp.leases" ] && [ -z "$tmp_mac" ] && local tmp_mac=`cat /var/dhcp.leases|grep -w ${1}|awk '{print $2}'|grep -v "^$"|sort -u|head -n1`
-	[ -z "$tmp_mac" ] && local tmp_mac=`cat /proc/net/arp|grep "0x2\|0x6"|grep -w ${1}|awk '{print $4}'|grep -v "^$"|sort -u|head -n1`
-	[ -z "$tmp_mac" ] && local tmp_mac="unknown"
-	echo "$tmp_mac"
+getmac(){
+	local tmp_mac
+	
+	# 为unknown时重新读取
+	if [ -f "${dir}ipAddress" ]; then
+		tmp_mac=$(awk -v ip="$1" '$1 == ip {print $2; exit}' "${dir}ipAddress")
+	fi
+	
+	if [ -z "$tmp_mac" ] && [ -f "${dir}tmp_downlist" ]; then
+		tmp_mac=$(awk -v ip="$1" '$1 == ip {print $2; exit}' "${dir}tmp_downlist")
+	fi
+	
+	if [ -z "$tmp_mac" ] && [ -f "/var/dhcp.leases" ]; then
+		tmp_mac=$(awk -v ip="$1" '$3 == ip {print $2; exit}' /var/dhcp.leases)
+	fi
+	
+	if [ -z "$tmp_mac" ]; then
+		tmp_mac=$(awk -v ip="$1" '$1 == ip && ($3 == "0x2" || $3 == "0x6") {print $4; exit}' /proc/net/arp)
+	fi
+	
+	echo "${tmp_mac:-unknown}"
 }
 
 # 查询主机名
-function getname(){
-	[ -z "$tmp_name" ] && local tmp_name=`echo "$device_aliases"|grep -i $2|awk '{print $2}'|grep -v "^$"|sort -u|head -n1`
-	[ -f "${dir}ipAddress" ] && [ -z "$tmp_name" ] && local tmp_name=`cat ${dir}ipAddress|grep -w ${1}|awk '{print $3}'|grep -v "^$"|sort -u|head -n1`
-	[ -f "${dir}tmp_downlist" ] && [ -z "$tmp_name" ] && local tmp_name=`cat ${dir}tmp_downlist|grep -w ${1}|awk '{print $3}'|grep -v "^$"|sort -u|head -n1`
-	( ! echo "$tmp_name"|grep -q -w "unknown\|*" ) && [ ! -z "$tmp_name" ] && echo "$tmp_name" && return || unset tmp_name # 为unknown时重新读取
-	[ -f "/var/dhcp.leases" ] && [ -z "$tmp_name" ] && local tmp_name=`cat /var/dhcp.leases|grep -w ${1}|awk '{print $4}'|grep -v "^$"|sort -u|head -n1`
-	( ! echo "$tmp_name"|grep -q -w "unknown\|*" ) && [ ! -z "$tmp_name" ] && echo "$tmp_name" && return || unset tmp_name # 为unknown时重新读取
-	[ -z "$dhcp_config" ] && dhcp_config=`uci show dhcp|grep "ip\|mac\|name"`
+getname(){
+	local tmp_name
+	
+	# 从设备别名中查找
+	if [ -n "$device_aliases" ]; then
+		tmp_name=$(echo "$device_aliases" | grep -i "$2" | awk '{print $2}' | head -n1)
+	fi
+	
+	# 从 ipAddress 文件查找
+	if [ -z "$tmp_name" ] && [ -f "${dir}ipAddress" ]; then
+		tmp_name=$(awk -v ip="$1" '$1 == ip {print $3; exit}' "${dir}ipAddress")
+	fi
+	
+	# 从 tmp_downlist 查找
+	if [ -z "$tmp_name" ] && [ -f "${dir}tmp_downlist" ]; then
+		tmp_name=$(awk -v ip="$1" '$1 == ip {print $3; exit}' "${dir}tmp_downlist")
+	fi
+	
+	# 如果找到有效名称则返回
+	if [ -n "$tmp_name" ] && ! echo "$tmp_name" | grep -qw "unknown\|\\*"; then
+		echo "$tmp_name"
+		return 0
+	fi
+	
+	# 从 DHCP leases 查找
+	if [ -f "/var/dhcp.leases" ]; then
+		tmp_name=$(awk -v ip="$1" '$3 == ip {print $4; exit}' /var/dhcp.leases)
+		if [ -n "$tmp_name" ] && ! echo "$tmp_name" | grep -qw "unknown\|\\*"; then
+			echo "$tmp_name"
+			return 0
+		fi
+	fi
+	
+	# 从 UCI DHCP 配置查找
+	if [ -z "$dhcp_config" ]; then
+		dhcp_config=$(uci show dhcp 2>/dev/null | grep -E "ip|mac|name")
+	fi
+	
 	for dhcp_config_str in "host" "domain"; do
-		local dhcp_ip_n=`echo "$dhcp_config"|grep -w ^dhcp.@${dhcp_config_str}.*ip=.${1}|sed -nr 's#^dhcp.(.*).ip.*#\1#gp'` 2>/dev/null
-		[ ! -z "$dhcp_ip_n" ] && [ -z "$tmp_name" ] && local tmp_name=`uci get dhcp.${dhcp_ip_n}.name` 2>/dev/null
-		local dhcp_mac_n=`echo "$dhcp_config"|grep -i ^dhcp.@${dhcp_config_str}.*mac=.${2}|sed -nr 's#^dhcp.(.*).mac.*#\1#gp'` 2>/dev/null
-		[ ! -z "$dhcp_mac_n" ] && [ -z "$tmp_name" ] && local tmp_name=`uci get dhcp.${dhcp_ip_n}.name` 2>/dev/null
-		[ ! -z "$tmp_name" ] && break
+		local dhcp_ip_n dhcp_mac_n
+		dhcp_ip_n=$(echo "$dhcp_config" | grep -w "^dhcp.@${dhcp_config_str}.*ip=.${1}" | sed -nr 's#^dhcp.(.*).ip.*#\1#gp' 2>/dev/null)
+		if [ -n "$dhcp_ip_n" ]; then
+			tmp_name=$(uci get "dhcp.${dhcp_ip_n}.name" 2>/dev/null)
+		fi
+		
+		dhcp_mac_n=$(echo "$dhcp_config" | grep -i "^dhcp.@${dhcp_config_str}.*mac=.${2}" | sed -nr 's#^dhcp.(.*).mac.*#\1#gp' 2>/dev/null)
+		if [ -n "$dhcp_mac_n" ] && [ -z "$tmp_name" ]; then
+			tmp_name=$(uci get "dhcp.${dhcp_mac_n}.name" 2>/dev/null)
+		fi
+		
+		[ -n "$tmp_name" ] && break
 	done
-	( ! echo "$tmp_name"|grep -q -w "unknown\|*" ) && [ ! -z "$tmp_name" ] && echo "$tmp_name" && return || unset tmp_name # 为unknown时重新读取
-	[ -f "$oui_base" ] && local tmp_name=$(cat $oui_base|grep -i $(echo "$2"|cut -c 1,2,4,5,7,8)|sed -nr 's#^.*16)..(.*)#\1#gp'|sed 's/ /_/g')
-	[ ! -z "$oui_data" ] && [ "$oui_data" -eq "4" ] && local tmp_name=$(curl -sS "${oui_url}"|grep -i $(echo "$2"|cut -c 1,2,4,5,7,8)|sed -nr 's#^.*16)..(.*)#\1#gp'|sed 's/ /_/g')
-	[ -z "$tmp_name" ] && local tmp_name="unknown"
-	echo "$tmp_name"
+	
+	if [ -n "$tmp_name" ] && ! echo "$tmp_name" | grep -qw "unknown\|\\*"; then
+		echo "$tmp_name"
+		return 0
+	fi
+	
+	# 从 OUI 数据库查找厂商信息
+	if [ -f "$oui_base" ]; then
+		local mac_prefix
+		mac_prefix=$(echo "$2" | cut -c 1,2,4,5,7,8)
+		tmp_name=$(grep -i "$mac_prefix" "$oui_base" | sed -nr 's#^.*16)..(.*)#\1#gp' | sed 's/ /_/g' | head -n1)
+	fi
+	
+	# 在线查询 OUI
+	if [ -z "$tmp_name" ] && [ -n "$oui_data" ] && [ "$oui_data" -eq "4" ]; then
+		local mac_prefix
+		mac_prefix=$(echo "$2" | cut -c 1,2,4,5,7,8)
+		tmp_name=$(curl -sS "${oui_url}" 2>/dev/null | grep -i "$mac_prefix" | sed -nr 's#^.*16)..(.*)#\1#gp' | sed 's/ /_/g' | head -n1)
+	fi
+	
+	echo "${tmp_name:-unknown}"
 }
 
 # 查询设备接口
-function getinterface(){
-	[ -f "${dir}ipAddress" ] && local ip_interface=`cat ${dir}ipAddress|grep -w ${1}|awk '{print $5}'|grep -v "^$"|sort -u|head -n1`
-	[ -f "${dir}tmp_downlist" ] && [ -z "$ip_interface" ] && local ip_interface=`cat ${dir}tmp_downlist|grep -w ${1}|awk '{print $5}'|grep -v "^$"|sort -u|head -n1`
-	if [ -z "$ip_interface" ] && [ ! -z "$wlan_interface" ]; then
+getinterface(){
+	local ip_interface
+	
+	# 从 ipAddress 文件查找
+	if [ -f "${dir}ipAddress" ]; then
+		ip_interface=$(awk -v mac="$1" '$2 == mac {print $5; exit}' "${dir}ipAddress")
+	fi
+	
+	# 从 tmp_downlist 查找
+	if [ -z "$ip_interface" ] && [ -f "${dir}tmp_downlist" ]; then
+		ip_interface=$(awk -v mac="$1" '$2 == mac {print $5; exit}' "${dir}tmp_downlist")
+	fi
+	
+	# 从无线接口查找
+	if [ -z "$ip_interface" ] && [ -n "$wlan_interface" ]; then
 		for interface in $wlan_interface; do
-			local ip_interface=`iw dev $interface station dump 2>/dev/null|grep Station|grep -i -w ${1}|sed -nr 's#^.*on (.*))#\1#gp'` >/dev/null 2>&1
-			[ ! -z "$ip_interface" ] && echo "$ip_interface" && return
+			if iw dev "$interface" station dump 2>/dev/null | grep -qi "Station.*${1}"; then
+				ip_interface="$interface"
+				break
+			fi
 		done
 	fi
-	[ -z "$ip_interface" ] && local ip_interface=`cat /proc/net/arp|grep "0x2\|0x6"|grep -i -w ${1}|awk '{print $6}'|grep -v "^$"|sort -u|head -n1`
+	
+	# 从 ARP 表查找
+	if [ -z "$ip_interface" ]; then
+		ip_interface=$(awk -v mac="$1" 'tolower($4) == tolower(mac) && ($3 == "0x2" || $3 == "0x6") {print $6; exit}' /proc/net/arp)
+	fi
+	
 	echo "$ip_interface"
 }
 
 # ping
-function getping(){
-	[ "$iw_version" ] && local wlan_online=`iw dev ${ip_interface} station dump|grep -i -w ${ip_mac}|grep Station` >/dev/null 2>&1
-	[ "$wlan_online" ] && return 0
-	for i in `seq 1 ${3}`; do
-		( ! echo "$ip_ms"|grep -q "ms" ) && local ip_ms=$( arping -I `cat /proc/net/arp|grep -w ${1}|awk '{print $6}'|grep -v "^$"|sort -u|head -n1` -c 20 -f -w ${2} $1 ) 2>/dev/null
-		( ! echo "$ip_ms"|grep -q "ms" ) && local ip_ms=`ping -c 5 -w ${2} ${1}|grep -v '100% packet loss'` 2>/dev/null
-		( ! echo "$ip_ms"|grep -q "ms" ) && sleep 1
+getping(){
+	local ip="$1"
+	local timeout="$2"
+	local retry="${3:-1}"
+	local ip_ms
+	
+	# 检查无线设备是否在线
+	if [ -n "$iw_version" ] && [ -n "$ip_interface" ]; then
+		if iw dev "$ip_interface" station dump 2>/dev/null | grep -qi "Station.*${ip_mac}"; then
+			return 0
+		fi
+	fi
+	
+	# 尝试 ping 检测
+	local i
+	for i in $(seq 1 "$retry"); do
+		if [ -z "$ip_ms" ]; then
+			# 尝试使用 arping
+			local arp_interface
+			arp_interface=$(awk -v ip="$ip" '$1 == ip {print $6; exit}' /proc/net/arp)
+			if [ -n "$arp_interface" ] && command -v arping >/dev/null 2>&1; then
+				ip_ms=$(arping -I "$arp_interface" -c 3 -f -w "$timeout" "$ip" 2>/dev/null)
+			fi
+		fi
+		
+		if [ -z "$ip_ms" ] || ! echo "$ip_ms" | grep -q "ms"; then
+			# 使用普通 ping
+			ip_ms=$(ping -c 3 -W "$timeout" "$ip" 2>/dev/null | grep -v '100% packet loss')
+		fi
+		
+		if echo "$ip_ms" | grep -q "ms"; then
+			return 0
+		fi
+		
+		[ "$i" -lt "$retry" ] && sleep 1
 	done
-	( echo "$ip_ms"|grep -q "ms" )
+	
+	return 1
 }
 
 # CPU 占用率
-function getcpu(){
-	local AT=$(cat /proc/stat|grep "^cpu "|awk '{print $2+$3+$4+$5+$6+$7+$8 " " $2+$3+$4+$7+$8}')
+getcpu(){
+	local AT BT
+	AT=$(awk '/^cpu / {print $2+$3+$4+$5+$6+$7+$8, $2+$3+$4+$7+$8}' /proc/stat)
 	sleep 3
-	local BT=$(cat /proc/stat|grep "^cpu "|awk '{print $2+$3+$4+$5+$6+$7+$8 " " $2+$3+$4+$7+$8}')
-	printf "%.01f%%" $(echo ${AT} ${BT}|awk '{print (($4-$2)/($3-$1))*100}')
+	BT=$(awk '/^cpu / {print $2+$3+$4+$5+$6+$7+$8, $2+$3+$4+$7+$8}' /proc/stat)
+	echo "$AT $BT" | awk '{printf "%.1f", (($4-$2)/($3-$1))*100}'
 }
 
 # 获取SOC温度 （取所有传感器温度最大值）
-function soc_temp(){
-	[ -z "$soc_code" ] && local soctemp=`sensors 2>/dev/null|grep °C|sed -nr 's#^.*:.*\+(.*)°C .*#\1#gp'|sort -nr|head -n1`
-	[ -z "$soc_code" ] && [ -z "$soctemp" ] && local soctemp=`cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null|sort -nr|head -n1|cut -c-2`
-	[ "$soc_code" == "pve" ] && [ ! -z "$pve_host" ] && local soctemp=`ssh -i ~/.ssh/id_rsa root@${pve_host} -p ${pve_port} sensors 2>/dev/null|grep °C|sed -nr 's#^.*:.*\+(.*)°C .*#\1#gp'|sort -nr|head -n1`
-	[ ! -z "$soctemp" ] && echo "$soctemp" && return
-	[ ! -z "$soc_code" ] && eval `echo "$soc_code"` 2>/dev/null
+soc_temp(){
+	local soctemp
+	
+	# 尝试从 sensors 获取温度
+	if [ -z "$soc_code" ] && command -v sensors >/dev/null 2>&1; then
+		soctemp=$(sensors 2>/dev/null | grep '°C' | sed -nr 's#^.*:.*\+(.*)°C.*#\1#p' | sort -nr | head -n1)
+	fi
+	
+	# 从 thermal_zone 获取温度
+	if [ -z "$soc_code" ] && [ -z "$soctemp" ]; then
+		soctemp=$(cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null | sort -nr | head -n1)
+		[ -n "$soctemp" ] && soctemp=$((soctemp / 1000))
+	fi
+	
+	# PVE 远程获取温度
+	if [ "$soc_code" = "pve" ] && [ -n "$pve_host" ]; then
+		soctemp=$(ssh -i ~/.ssh/id_rsa "root@${pve_host}" -p "${pve_port:-22}" sensors 2>/dev/null | grep '°C' | sed -nr 's#^.*:.*\+(.*)°C.*#\1#p' | sort -nr | head -n1)
+	fi
+	
+	# 返回温度或执行自定义代码
+	if [ -n "$soctemp" ]; then
+		echo "$soctemp"
+	elif [ -n "$soc_code" ]; then
+		eval "$soc_code" 2>/dev/null
+	fi
 }
 
 # 流量数据
-function usage(){
-	[ ! -f "/usr/sbin/wrtbwmon" ] || [ ! "$1" ] && return
-	if [ $1 == "update" ] ;then
-		function version_le() { test "$(echo "$@"|tr " " "\n"|sort -n|head -n 1)" == "$1"; }
-		function version_ge() { test "$(echo "$@"|tr " " "\n"|sort -r|head -n 1)" == "$1"; }
+usage(){
+	[ ! -f "/usr/sbin/wrtbwmon" ] || [ -z "$1" ] && return 1
+	if [ "$1" = "update" ]; then
+		version_le() { test "$(printf '%s\n' "$@" | sort -V | head -n1)" = "$1"; }
+		version_ge() { test "$(printf '%s\n' "$@" | sort -Vr | head -n1)" = "$1"; }
 		[ ! -z "$wr_version" ] && ( version_ge "${wr_version}" "1.2.0" ) && wrtbwmon -f ${dir}usage.db 2>/dev/null && return
 		[ ! -z "$wr_version" ] && ( version_le "${wr_version}" "1.0.0" ) || [ -z "$wr_version" ] && wrtbwmon update ${dir}usage.db 2>/dev/null && return
-	elif [ $1 == "get" ] ;then
+	elif [ "$1" = "get" ]; then
 		[ ! -f "${dir}usage.db" ] && [ ! "$3" ] && echo `bytes_for_humans 0` && return
 		[ ! -f "${dir}usage.db" ] && [ "$3" ] && echo 0 && return
 		[ -z "$total_n" ] && total_n=`cat ${dir}usage.db|head -n1|grep "total"|sed 's/,/\n/g'|awk '/total/{print NR}'` 2>/dev/null
@@ -291,14 +492,14 @@ function usage(){
 		[ "$2" ] && local tmptotal=`cat ${dir}usage.db|sed 's/,,,/,0,0,/g'|sed 's/,,/,0,/g'|sed 's/,/ /g'|grep -i -w ${2}|awk "{print "'$'$total_n"}"|grep -v "^$"|sort -u|head -n1` 2>/dev/null
 		[ -z "$tmptotal" ] && local tmptotal="0"
 		[ ! "$3" ] && echo `bytes_for_humans ${tmptotal}` || echo "$tmptotal"
-	elif [ $1 == "down" ] ;then
+	elif [ "$1" = "down" ]; then
 		[ "$2" ] && sed -i "/,${2},/d" ${dir}usage.db 2>/dev/null
 	fi
 }
 
 # 流量数据单位换算
-function bytes_for_humans {
-	[ ! "$1" ] && return
+bytes_for_humans(){
+	[ -z "$1" ] && return 1
 	[ "$1" -gt 1073741824 ] && echo "`awk 'BEGIN{printf "%.2f\n",'$1'/'1073741824'}'` G" && return
 	[ "$1" -gt 1048576 ] && echo "`awk 'BEGIN{printf "%.2f\n",'$1'/'1048576'}'` M" && return
 	[ "$1" -gt 1024 ] && echo "`awk 'BEGIN{printf "%.2f\n",'$1'/'1024'}'` K" && return
@@ -306,7 +507,7 @@ function bytes_for_humans {
 }
 
 # 设备异常流量检测
-function get_client_usage(){
+get_client_usage(){
 	[ -z "$client_usage" ] && return
 	[ "$client_usage" -ne "1" ] && return
 	[ -z "$client_usage_max" ] && return
@@ -352,8 +553,8 @@ function get_client_usage(){
 }
 
 # 时间单位换算
-function time_for_humans {
-	[ ! "$1" ] && return
+time_for_humans(){
+	[ -z "$1" ] && return 1
 	if [ "$1" -lt 60 ]; then
 		echo "${1} 秒"
 	elif [ "$1" -lt 3600 ]; then
@@ -377,17 +578,16 @@ function time_for_humans {
 }
 
 # 计算字符真实长度
-function length_str {
-	[ ! "$1" ] && return
+length_str(){
+	[ -z "$1" ] && return 1
 	local length_zh=`echo "$1"|awk '{print gensub(/[\u4e00-\u9FA5A-Za-z0-9_]/,"","g",$0)}'|awk -F "" '{print NF}'`
 	local length_en=`echo "$1"|awk '{print gensub(/[^\u4e00-\u9FA5A-Za-z0-9_]/,"","g",$0)}'|awk -F "" '{print NF}'`
 	echo `expr $length_zh / 3 \* 2 + $length_en`
 }
 
 # 截取字符，避免中文乱码
-function cut_str {
-	[ ! "$1" ] && return
-	[ ! "$2" ] && return
+cut_str(){
+	[ -z "$1" ] || [ -z "$2" ] && return 1
 	[ `length_str $1` -le "$2" ] && echo "$1" && return
 	local temp_length=$2
 	while [ $(length_str `echo "$1"|cut -c -$temp_length`) -lt "$2" ]; do
@@ -401,15 +601,17 @@ function cut_str {
 }
 
 # 随机数
-function rand(){
-    local min=$1
-    local max=$(($2- $min + 1))
-    local num=$(date +%s%N)
-    echo $(($num % $max + $min))
+rand(){
+	local min="${1:-1}"
+	local max="${2:-100}"
+	local range=$((max - min + 1))
+	local num
+	num=$(awk 'BEGIN{srand();print int(rand()*32768)}')
+	echo $((num % range + min))
 }
 
 # 在线设备列表
-function pushbot_first(){
+pushbot_first(){
 	[ -f "${dir}ipAddress" ] && local IPLIST=`cat ${dir}ipAddress|awk '{print $1}'|grep -v "^$"|sort -u`
 	for ip in $IPLIST; do
 		read -u 5
@@ -431,11 +633,11 @@ function pushbot_first(){
 	wait
 }
 # 创建计划任务
-function pushbot_cron(){
-	function del_cron(){
+pushbot_cron(){
+	del_cron(){
 		( echo `crontab -l 2>/dev/null`|grep -q "pushbot" ) && crontab -l > conf && sed -i "/pushbot/d" conf && crontab conf && rm -f conf >/dev/null 2>&1
 	}
-	function re_cron(){
+	re_cron(){
 		/etc/init.d/cron stop
 		/etc/init.d/cron start
 	}
@@ -463,7 +665,7 @@ function pushbot_cron(){
 }
 
 # 免打扰检测
-function pushbot_disturb(){
+pushbot_disturb(){
 	[ -z "$pushbot_sheep" ] || [ -z "$starttime" ] || [ -z "$endtime" ] && return 0
 	if [ `date +%H` -ge $endtime -a $starttime -lt $endtime ] || [ `date +%H` -lt $starttime -a $starttime -lt $endtime ] || [ `date +%H` -lt $starttime -a `date +%H` -ge $endtime -a $starttime -gt $endtime ]; then
 		unset sheep_starttime
@@ -485,21 +687,21 @@ function pushbot_disturb(){
 }
 
 # 文件锁
-function LockFile(){
-	if [ $1 = "lock" ] ;then
+LockFile(){
+	if [ "$1" = "lock" ]; then
 		[ ! -f "${dir}pushbot.lock" ] && > ${dir}pushbot.lock && return
 		while [ -f "${dir}pushbot.lock" ]; do
 			enable_detection 1
 		done
 		LockFile lock
 	fi
-	[ $1 = "unlock" ] && rm -f ${dir}pushbot.lock >/dev/null 2>&1
+	[ "$1" = "unlock" ] && rm -f "${dir}pushbot.lock" >/dev/null 2>&1
 	return 0
 }
 
 # 检测黑白名单
-function blackwhitelist(){
-	[ ! "$1" ] && return 1
+blackwhitelist(){
+	[ -z "$1" ] && return 1
 	[ -z "$pushbot_whitelist" ] && [ -z "$pushbot_blacklist" ] && [ -z "$pushbot_interface" ] && [ -z "$MAC_online_list" ] && [ -z "$MAC_offline_list" ] && return 0
 	[ ! -z "$pushbot_whitelist" ] && ( echo "$pushbot_whitelist"|grep -q -i -w $1 ) && return 1
 	[ ! -z "$pushbot_blacklist" ] && ( ! echo "$pushbot_blacklist"|grep -q -i -w $1 ) && return 1
@@ -510,7 +712,7 @@ function blackwhitelist(){
 	return 0
 }
 
-function get_client(){
+get_client(){
     if [ -f "${dir}ipAddress" ]; then
         while read line; do
             # 对客户端名称进行清理,移除引号和特殊字符
@@ -556,7 +758,7 @@ EOF
 }
 
 # 重启网络服务
-function network_restart(){
+network_restart(){
 cat>${dir}network_restart<<EOF
 #!/bin/sh
 /etc/init.d/network restart >/dev/null 2>&1 &
@@ -568,7 +770,7 @@ EOF
 }
 
 # 查看无人值守任务设备是否在线
-function geterrdevicealiases(){
+geterrdevicealiases(){
 	[ -z "$err_device_aliases" ] && return
 	[ -f ${dir}ipAddress ] && local logrow=$(grep -c "" ${dir}ipAddress) || local logrow="0";[ $logrow -eq "0" ] && return
 	local MACLIST=`cat ${dir}ipAddress|awk '{print $2}'|grep -v "^$"|sort -u`
@@ -593,7 +795,7 @@ function geterrdevicealiases(){
 }
 
 # 无人值守任务
-function unattended(){
+unattended(){
 	[ -z "$err_enable" ] || [ "$err_enable" -ne "1" ] && return
 	[ ! -z "$err_sheep_enable" ] && [ "$err_sheep_enable" -eq "1" ] && [ -z "$sheep_starttime" ] && return
 	geterrdevicealiases;[ $? -eq "1" ] && return
@@ -633,8 +835,8 @@ function unattended(){
 }
 
 # 检测网络状态
-function rand_geturl(){
-	function getcheck(){
+rand_geturl(){
+	getcheck(){
 		local urllist="https://www.163.com https://www.qq.com https://www.baidu.com https://www.qidian.com https://www.douban.com"
 		local url_number=`expr $(echo "$urllist"|grep -o ' '|wc -l) + 1`
 		local url_str=`echo "$urllist"|awk -v i=$(rand 1 $url_number) '{print $i}'`
@@ -729,7 +931,7 @@ function rand_geturl(){
 }
 
 # 检测 ip 状况
-function ip_changes(){
+ip_changes(){
 	[ ! -z "$pushbot_ipv4" ] && [ "$pushbot_ipv4" -eq "1" ] && local IPv4=`getip wanipv4`
 	[ ! -z "$pushbot_ipv4" ] && [ "$pushbot_ipv4" -eq "2" ] && local IPv4=`getip hostipv4`
 	[ ! -z "$pushbot_ipv6" ] && [ "$pushbot_ipv6" -eq "1" ] && local IPv6=`getip wanipv6`
@@ -782,7 +984,7 @@ function ip_changes(){
 }
 
 # 检测设备上线
-function up(){
+up(){
 	[ -f ${dir}ipAddress ] && ( cat ${dir}ipAddress|grep -q -w $1 ) && return
 	local ip_mac=`getmac $1`
 	local ip_name=`getname ${1} ${ip_mac}`
@@ -835,7 +1037,7 @@ function up(){
 }
 
 # 检测设备离线
-function down(){
+down(){
 	local ip_mac=`getmac $1`
 	local ip_name=`getname ${1} ${ip_mac}`
 	local ip_interface=`getinterface ${ip_mac}`
@@ -858,7 +1060,7 @@ function down(){
 }
 
 # 设备离线通知
-function down_send(){
+down_send(){
 	[ ! -f "${dir}tmp_downlist" ] && return
 	local IPLIST=`cat ${dir}tmp_downlist|awk '{print $1}'`
 	for ip in $IPLIST; do
@@ -891,7 +1093,7 @@ function down_send(){
 }
 
 # 当前设备列表
-function current_device(){
+current_device(){
 	( echo "$lite_enable"|grep -q "content" ) || ( echo "$lite_enable"|grep -q "device" ) && return
 	[ -f ${dir}ipAddress ] && local logrow=$(grep -c "" ${dir}ipAddress) || local logrow="0";[ $logrow -eq "0" ] && return
 	[ -f ${dir}usage.db ] && local ip_total_db="总计流量${str_space}${str_space}${str_space}${str_space}"
@@ -921,7 +1123,7 @@ function current_device(){
 }
 
 # 检测 cpu 状态
-function cpu_load(){
+cpu_load(){
 	if [ ! -z "$temperature_enable" ] && [ "$temperature_enable" -eq "1" ] && [ ! -z "$temperature" ]; then
 		[ -z "$temperature_time" ] && temperature_time=`date +%s`
 		local cpu_wendu=`soc_temp`;
@@ -972,7 +1174,7 @@ function cpu_load(){
 	fi
 }
 
-function cputop(){
+cputop(){
 	[ -z "$1" ] && content="${content}${str_splitline}${str_title_start} 当前 CPU 占用前三的进程${str_title_end}"
 	local gettop=`top -bn 1|grep -v "top -bn 1"`
 	for i in `seq 5 7`; do
@@ -987,7 +1189,7 @@ function cputop(){
 }
 
 # 生成日志监控文件，避免后台影响 wait 语句
-function get_syslog(){
+get_syslog(){
 	kill -9 `pgrep -f "logread -f -p notice"` 2>/dev/null
 	[ -z "$web_logged" ] && [ -z "$ssh_logged" ] && [ -z "$web_login_failed" ] && [ -z "$ssh_login_failed" ] && return
 	rm -f ${dir}login_monitor >/dev/null 2>&1
@@ -1001,7 +1203,7 @@ EOF
 }
 
 # 登录提醒通知
-function login_send(){
+login_send(){
 	[ -z "$web_logged" ] && [ -z "$ssh_logged" ] && [ -z "$web_login_failed" ] && [ -z "$ssh_login_failed" ] && return
 	[ ! -f ${dir}login_monitor ] && return
 	cat ${dir}login_monitor|grep -i "accepted login"|awk '{print $4" "$NF}' >> ${dir}web_login
@@ -1111,7 +1313,7 @@ function login_send(){
 }
 
 # 添加黑名单
-function add_ip_black(){
+add_ip_black(){
 	[ -f "${ip_blacklist_path}" ] && local logrow=$(grep -c "" ${ip_blacklist_path}) || local logrow="0"
 	[ ! -f "${ip_blacklist_path}" ] && local logrow="0"
 	[ ! -z "$web_login_black" ] && [ "$web_login_black" -eq "0" ] || [ -z "$web_login_black" ] && local logrow="0"
@@ -1134,7 +1336,7 @@ function add_ip_black(){
 }
 
 # 发送定时数据
-function send(){
+send(){
 	echo "`date "+%Y-%m-%d %H:%M:%S"` 【定时数据】创建定时任务" >> ${logfile}
 	pushbot_disturb;local send_disturb=$?
 	get_config "send_title" "router_status" "router_temp" "router_wan" "client_list" "google_check_timeout"
@@ -1234,10 +1436,17 @@ if [ "$1" ] ;then
 fi
 
 # 载入在线设备
-pushbot_init;[ $? -eq 1 ] && echo "`date "+%Y-%m-%d %H:%M:%S"` 【！！！】读取设置出错，请检查设置项 " >> ${logfile} && exit
-echo "`date "+%Y-%m-%d %H:%M:%S"` 【初始化】载入在线设备" >> ${logfile}
-> ${dir}send_enable.lock && pushbot_first && deltemp
-echo "`date "+%Y-%m-%d %H:%M:%S"` 【初始化】初始化完成" >> ${logfile}
+if ! pushbot_init; then
+	echo "$(date "+%Y-%m-%d %H:%M:%S") 【！！！】读取设置出错，请检查设置项" >> "$logfile"
+	exit 1
+fi
+
+echo "$(date "+%Y-%m-%d %H:%M:%S") 【初始化】PushBot 启动" >> "$logfile"
+echo "$(date "+%Y-%m-%d %H:%M:%S") 【初始化】日志文件: $logfile" >> "$logfile"
+echo "$(date "+%Y-%m-%d %H:%M:%S") 【初始化】载入在线设备" >> "$logfile"
+
+> "${dir}send_enable.lock" && pushbot_first && deltemp
+echo "$(date "+%Y-%m-%d %H:%M:%S") 【初始化】初始化完成" >> "$logfile"
 
 # 循环
 while [ "$pushbot_enable" -eq "1" ]; do

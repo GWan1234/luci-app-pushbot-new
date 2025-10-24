@@ -25,10 +25,30 @@ function act_status()
 end
 
 function get_log()
-	luci.http.write(luci.sys.exec(
-		"[ -f '/tmp/pushbot/pushbot.log' ] && cat /tmp/pushbot/pushbot.log"))
+	local log_path = "/tmp/pushbot/pushbot.log"
+	local log_content = ""
+	
+	-- 检查日志文件是否存在
+	if nixio.fs.access(log_path) then
+		log_content = luci.sys.exec("cat " .. log_path)
+	else
+		-- 检查是否启用了日志
+		local debuglevel = luci.sys.exec("uci -q get pushbot.pushbot.debuglevel")
+		if debuglevel:match("^%s*$") or debuglevel:match("^0") then
+			log_content = "日志功能未启用。\n请在「配置」页面中启用「开启日志」选项。"
+		else
+			log_content = "日志文件不存在: " .. log_path .. "\n请检查 PushBot 服务是否正在运行。"
+		end
+	end
+	
+	luci.http.prepare_content("text/plain; charset=utf-8")
+	luci.http.write(log_content)
 end
 
 function clear_log()
-	luci.sys.call("echo '' > /tmp/pushbot/pushbot.log")
+	local log_path = "/tmp/pushbot/pushbot.log"
+	if nixio.fs.access(log_path) then
+		luci.sys.call("echo '' > " .. log_path)
+		luci.sys.call("echo '$(date \"+%Y-%m-%d %H:%M:%S\") 【系统】日志已清空' >> " .. log_path)
+	end
 end
